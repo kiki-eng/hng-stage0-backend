@@ -1,0 +1,6 @@
+@HngStageZeroClean_HostAddress = http://localhost:5262
+
+GET {{HngStageZeroClean_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
