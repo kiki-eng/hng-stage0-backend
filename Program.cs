@@ -1,6 +1,8 @@
+using HngStageZeroClean.Data;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -16,18 +18,21 @@ builder.Services.AddCors(options =>
     });
 });
 
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite("Data Source=profiles.db"));
+
 var app = builder.Build();
 
-// Swagger
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
 }
 
-app.UseCors("AllowAll");
+app.UseSwagger();
+app.UseSwaggerUI();
 
-app.UseHttpsRedirection();
+app.UseCors("AllowAll");
 
 app.MapControllers();
 
