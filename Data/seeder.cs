@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using HngStageZeroClean.Models;
+using HngStageZeroClean.Helpers;
 
 namespace HngStageZeroClean.Data;
 
@@ -8,7 +9,6 @@ public static class Seeder
 {
     public static async Task SeedProfiles(AppDbContext db)
     {
-        // Prevent duplicate seeding
         if (await db.Profiles.AsNoTracking().AnyAsync())
             return;
 
@@ -41,7 +41,7 @@ public static class Seeder
             .Select(g => g.First())
             .Select(p => new Profile
             {
-                Id = Guid.NewGuid().ToString(),
+                Id = UuidV7Generator.Create().ToString(),
                 Name = p.Name.Trim(),
                 Gender = p.Gender,
                 GenderProbability = p.Gender_Probability,

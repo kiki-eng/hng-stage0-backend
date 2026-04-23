@@ -1,10 +1,10 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using HngStageZeroClean.Data;
+using HngStageZeroClean.Helpers;
 using HngStageZeroClean.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using HngStageZeroClean.Helpers;
 
 namespace HngStageZeroClean.Controllers;
 
@@ -127,6 +127,28 @@ public class ProfilesController : ControllerBase
             {
                 status = "success",
                 data = ToDetailResponse(profile)
+            });
+        }
+        catch (DbUpdateException)
+        {
+            var existing = await _db.Profiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Name.ToLower() == normalizedName);
+
+            if (existing != null)
+            {
+                return Ok(new
+                {
+                    status = "success",
+                    message = "Profile already exists",
+                    data = ToDetailResponse(existing)
+                });
+            }
+
+            return StatusCode(500, new
+            {
+                status = "error",
+                message = "Server failure"
             });
         }
         catch (HttpRequestException)
@@ -325,9 +347,14 @@ public class ProfilesController : ControllerBase
         int? minAge = null;
         int? maxAge = null;
 
-        if (q.Contains("female") || q.Contains("females"))
+        bool hasFemale = q.Contains("female") || q.Contains("females");
+        bool hasMale = q.Contains("male") || q.Contains("males");
+
+        if (hasFemale && hasMale)
+            gender = null;
+        else if (hasFemale)
             gender = "female";
-        else if (q.Contains("male") || q.Contains("males"))
+        else if (hasMale)
             gender = "male";
 
         if (q.Contains("young"))
@@ -347,25 +374,26 @@ public class ProfilesController : ControllerBase
 
         var aboveMatch = Regex.Match(q, @"above\s+(\d+)");
         if (aboveMatch.Success)
-        {
             minAge = int.Parse(aboveMatch.Groups[1].Value);
-        }
 
-        if (q.Contains("nigeria"))
-            countryId = "NG";
-        else if (q.Contains("kenya"))
-            countryId = "KE";
-        else if (q.Contains("angola"))
-            countryId = "AO";
-        else if (q.Contains("uganda"))
-            countryId = "UG";
-        else if (q.Contains("cameroon"))
-            countryId = "CM";
-        else if (q.Contains("ghana"))
-            countryId = "GH";
+        var belowMatch = Regex.Match(q, @"below\s+(\d+)");
+        if (belowMatch.Success)
+            maxAge = int.Parse(belowMatch.Groups[1].Value);
 
+        var underMatch = Regex.Match(q, @"under\s+(\d+)");
+        if (underMatch.Success)
+            maxAge = int.Parse(underMatch.Groups[1].Value);
+
+        var overMatch = Regex.Match(q, @"over\s+(\d+)");
+        if (overMatch.Success)
+            minAge = int.Parse(overMatch.Groups[1].Value);
+
+        countryId = ParseCountry(q);
+
+        bool hasBothGenders = hasFemale && hasMale;
         var interpreted =
             gender != null ||
+            hasBothGenders ||
             ageGroup != null ||
             countryId != null ||
             minAge.HasValue ||
@@ -456,18 +484,65 @@ public class ProfilesController : ControllerBase
         return "senior";
     }
 
+    private static readonly Dictionary<string, string> CountryNameToCode = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["nigeria"] = "NG", ["kenya"] = "KE", ["angola"] = "AO", ["uganda"] = "UG",
+        ["cameroon"] = "CM", ["ghana"] = "GH", ["ethiopia"] = "ET", ["south africa"] = "ZA",
+        ["benin"] = "BJ", ["egypt"] = "EG", ["tanzania"] = "TZ", ["united states"] = "US",
+        ["congo"] = "CD", ["senegal"] = "SN", ["ivory coast"] = "CI", ["cote d'ivoire"] = "CI",
+        ["france"] = "FR", ["india"] = "IN", ["united kingdom"] = "GB", ["mali"] = "ML",
+        ["rwanda"] = "RW", ["sudan"] = "SD", ["mozambique"] = "MZ", ["morocco"] = "MA",
+        ["madagascar"] = "MG", ["zimbabwe"] = "ZW", ["tunisia"] = "TN", ["brazil"] = "BR",
+        ["zambia"] = "ZM", ["germany"] = "DE", ["china"] = "CN", ["japan"] = "JP",
+        ["australia"] = "AU", ["south sudan"] = "SS", ["mauritania"] = "MR", ["canada"] = "CA",
+        ["somalia"] = "SO", ["namibia"] = "NA", ["mauritius"] = "MU", ["togo"] = "TG",
+        ["sao tome"] = "ST", ["niger"] = "NE", ["djibouti"] = "DJ",
+        ["republic of the congo"] = "CG", ["botswana"] = "BW", ["malawi"] = "MW",
+        ["guinea"] = "GN", ["western sahara"] = "EH", ["algeria"] = "DZ",
+        ["central african republic"] = "CF", ["burundi"] = "BI", ["sierra leone"] = "SL",
+        ["seychelles"] = "SC", ["liberia"] = "LR", ["comoros"] = "KM",
+        ["guinea-bissau"] = "GW", ["eritrea"] = "ER", ["eswatini"] = "SZ",
+        ["lesotho"] = "LS", ["gabon"] = "GA", ["cape verde"] = "CV", ["chad"] = "TD",
+        ["equatorial guinea"] = "GQ", ["gambia"] = "GM", ["burkina faso"] = "BF",
+        ["libya"] = "LY", ["usa"] = "US", ["uk"] = "GB", ["america"] = "US",
+        ["britain"] = "GB", ["england"] = "GB"
+    };
+
+    private static readonly Dictionary<string, string> CodeToCountryName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["NG"] = "Nigeria", ["KE"] = "Kenya", ["AO"] = "Angola", ["UG"] = "Uganda",
+        ["CM"] = "Cameroon", ["GH"] = "Ghana", ["ET"] = "Ethiopia", ["ZA"] = "South Africa",
+        ["BJ"] = "Benin", ["EG"] = "Egypt", ["TZ"] = "Tanzania", ["US"] = "United States",
+        ["CD"] = "DR Congo", ["SN"] = "Senegal", ["CI"] = "Ivory Coast",
+        ["FR"] = "France", ["IN"] = "India", ["GB"] = "United Kingdom", ["ML"] = "Mali",
+        ["RW"] = "Rwanda", ["SD"] = "Sudan", ["MZ"] = "Mozambique", ["MA"] = "Morocco",
+        ["MG"] = "Madagascar", ["ZW"] = "Zimbabwe", ["TN"] = "Tunisia", ["BR"] = "Brazil",
+        ["ZM"] = "Zambia", ["DE"] = "Germany", ["CN"] = "China", ["JP"] = "Japan",
+        ["AU"] = "Australia", ["SS"] = "South Sudan", ["MR"] = "Mauritania", ["CA"] = "Canada",
+        ["SO"] = "Somalia", ["NA"] = "Namibia", ["MU"] = "Mauritius", ["TG"] = "Togo",
+        ["ST"] = "Sao Tome", ["NE"] = "Niger", ["DJ"] = "Djibouti", ["CG"] = "Republic of the Congo",
+        ["BW"] = "Botswana", ["MW"] = "Malawi", ["GN"] = "Guinea", ["EH"] = "Western Sahara",
+        ["DZ"] = "Algeria", ["CF"] = "Central African Republic", ["BI"] = "Burundi",
+        ["SL"] = "Sierra Leone", ["SC"] = "Seychelles", ["LR"] = "Liberia", ["KM"] = "Comoros",
+        ["GW"] = "Guinea-Bissau", ["ER"] = "Eritrea", ["SZ"] = "Eswatini",
+        ["LS"] = "Lesotho", ["GA"] = "Gabon", ["CV"] = "Cape Verde", ["TD"] = "Chad",
+        ["GQ"] = "Equatorial Guinea", ["GM"] = "Gambia", ["BF"] = "Burkina Faso", ["LY"] = "Libya"
+    };
+
+    private static string? ParseCountry(string query)
+    {
+        foreach (var kvp in CountryNameToCode.OrderByDescending(k => k.Key.Length))
+        {
+            if (query.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase))
+                return kvp.Value;
+        }
+
+        return null;
+    }
+
     private static string GetCountryName(string countryId)
     {
-        return countryId.ToUpper() switch
-        {
-            "NG" => "Nigeria",
-            "KE" => "Kenya",
-            "AO" => "Angola",
-            "UG" => "Uganda",
-            "CM" => "Cameroon",
-            "GH" => "Ghana",
-            _ => countryId
-        };
+        return CodeToCountryName.TryGetValue(countryId.ToUpper(), out var name) ? name : countryId;
     }
 
     private static object ToDetailResponse(Profile p) => new

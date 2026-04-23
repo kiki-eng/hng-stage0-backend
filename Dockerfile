@@ -10,6 +10,6 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://0.0.0.0:${PORT}
+ENV ASPNETCORE_ENVIRONMENT=Production
 
-ENTRYPOINT ["dotnet", "HngStageZeroClean.dll"]
+ENTRYPOINT ["sh", "-c", "dotnet HngStageZeroClean.dll --urls=http://0.0.0.0:${PORT:-8080}"]
