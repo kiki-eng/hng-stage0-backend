@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HngStageZeroClean.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace HngStageZeroClean.Data;
 
@@ -7,17 +8,18 @@ public static class Seeder
 {
     public static async Task SeedProfiles(AppDbContext db)
     {
-        if (db.Profiles.Any())
-            return; // prevents duplicates
+        if (await db.Profiles.AsNoTracking().AnyAsync())
+            return;
 
-       var path = Path.Combine(Directory.GetCurrentDirectory(), "Data", "seed_profiles.json");
-       if (!File.Exists(path))
-{
-    Console.WriteLine($"Seed file not found at: {path}");
-    return;
-}
+        var path = Path.Combine(AppContext.BaseDirectory, "Data", "seed_profiles.json");
 
-      var json = await File.ReadAllTextAsync(path);
+        if (!File.Exists(path))
+        {
+            Console.WriteLine($"Seed file not found at: {path}");
+            return;
+        }
+
+        var json = await File.ReadAllTextAsync(path);
 
         var options = new JsonSerializerOptions
         {
@@ -29,24 +31,23 @@ public static class Seeder
         if (seedData?.Profiles == null)
             return;
 
-       var profiles = seedData.Profiles
-    .GroupBy(p => p.Name.Trim().ToLower())
-    .Select(g => g.First())
-    .Where(p => !db.Profiles.Any(x => x.Name.ToLower() == p.Name.Trim().ToLower()))
-    .Select(p => new Profile
-    {
-        Id = Guid.NewGuid().ToString(),
-        Name = p.Name.Trim(),
-        Gender = p.Gender,
-        GenderProbability = p.Gender_Probability,
-        Age = p.Age,
-        AgeGroup = p.Age_Group,
-        CountryId = p.Country_Id,
-        CountryName = p.Country_Name,
-        CountryProbability = p.Country_Probability,
-        CreatedAt = DateTime.UtcNow
-    })
-    .ToList();
+        var profiles = seedData.Profiles
+            .GroupBy(p => p.Name.Trim().ToLower())
+            .Select(g => g.First())
+            .Select(p => new Profile
+            {
+                Id = Guid.NewGuid().ToString(),
+                Name = p.Name.Trim(),
+                Gender = p.Gender,
+                GenderProbability = p.Gender_Probability,
+                Age = p.Age,
+                AgeGroup = p.Age_Group,
+                CountryId = p.Country_Id,
+                CountryName = p.Country_Name,
+                CountryProbability = p.Country_Probability,
+                CreatedAt = DateTime.UtcNow
+            })
+            .ToList();
 
         db.Profiles.AddRange(profiles);
         await db.SaveChangesAsync();

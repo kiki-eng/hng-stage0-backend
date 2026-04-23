@@ -1,6 +1,5 @@
 using HngStageZeroClean.Data;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,9 +25,7 @@ var connectionString = $"Data Source={Path.Combine(AppContext.BaseDirectory, "pr
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    options.UseSqlite(connectionString)
-           .EnableSensitiveDataLogging(false)
-           .LogTo(Console.WriteLine, LogLevel.Warning);
+    options.UseSqlite(connectionString);
 });
 
 var app = builder.Build();
@@ -36,6 +33,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
     db.Database.EnsureCreated();
 
     if (!db.Profiles.AsNoTracking().Any())
