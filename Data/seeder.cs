@@ -8,14 +8,17 @@ public static class Seeder
 {
     public static async Task SeedProfiles(AppDbContext db)
     {
-        // ✅ Prevent duplicate seeding (VERY IMPORTANT)
+        // Prevent duplicate seeding
         if (await db.Profiles.AsNoTracking().AnyAsync())
             return;
 
         var path = Path.Combine(AppContext.BaseDirectory, "Data", "seed_profiles.json");
 
         if (!File.Exists(path))
+        {
+            Console.WriteLine($"Seed file not found at: {path}");
             return;
+        }
 
         var json = await File.ReadAllTextAsync(path);
 
@@ -26,11 +29,14 @@ public static class Seeder
 
         var seedData = JsonSerializer.Deserialize<SeedWrapper>(json, options);
 
-        if (seedData?.Profiles == null)
+        if (seedData?.Profiles == null || !seedData.Profiles.Any())
+        {
+            Console.WriteLine("Seed file is empty or invalid.");
             return;
+        }
 
-        // ✅ Remove duplicates from JSON
         var profiles = seedData.Profiles
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
             .GroupBy(p => p.Name.Trim().ToLower())
             .Select(g => g.First())
             .Select(p => new Profile
@@ -48,8 +54,16 @@ public static class Seeder
             })
             .ToList();
 
+        if (!profiles.Any())
+        {
+            Console.WriteLine("No profiles found to seed.");
+            return;
+        }
+
         await db.Profiles.AddRangeAsync(profiles);
         await db.SaveChangesAsync();
+
+        Console.WriteLine($"Seeded {profiles.Count} profiles successfully.");
     }
 }
 
