@@ -17,9 +17,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Data/seed_profiles.json">
+    <None Update="Data/seed_profiles.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
+    </None>
   </ItemGroup>
 
 </Project>
