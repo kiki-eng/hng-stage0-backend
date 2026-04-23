@@ -10,7 +10,9 @@ public static class Seeder
         if (db.Profiles.Any())
             return; // prevents duplicates
 
-        var json = await File.ReadAllTextAsync("Data/seed_profiles.json");
+       var path = Path.Combine(Directory.GetCurrentDirectory(), "Data", "seed_profiles.json");
+
+      var json = await File.ReadAllTextAsync(path);
 
         var options = new JsonSerializerOptions
         {
