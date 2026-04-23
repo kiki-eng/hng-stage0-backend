@@ -1,6 +1,6 @@
 using System.Text.Json;
-using HngStageZeroClean.Models;
 using Microsoft.EntityFrameworkCore;
+using HngStageZeroClean.Models;
 
 namespace HngStageZeroClean.Data;
 
@@ -8,16 +8,14 @@ public static class Seeder
 {
     public static async Task SeedProfiles(AppDbContext db)
     {
+        // ✅ Prevent duplicate seeding (VERY IMPORTANT)
         if (await db.Profiles.AsNoTracking().AnyAsync())
             return;
 
         var path = Path.Combine(AppContext.BaseDirectory, "Data", "seed_profiles.json");
 
         if (!File.Exists(path))
-        {
-            Console.WriteLine($"Seed file not found at: {path}");
             return;
-        }
 
         var json = await File.ReadAllTextAsync(path);
 
@@ -31,6 +29,7 @@ public static class Seeder
         if (seedData?.Profiles == null)
             return;
 
+        // ✅ Remove duplicates from JSON
         var profiles = seedData.Profiles
             .GroupBy(p => p.Name.Trim().ToLower())
             .Select(g => g.First())
@@ -49,7 +48,7 @@ public static class Seeder
             })
             .ToList();
 
-        db.Profiles.AddRange(profiles);
+        await db.Profiles.AddRangeAsync(profiles);
         await db.SaveChangesAsync();
     }
 }

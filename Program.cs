@@ -8,8 +8,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
 
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+builder.Logging.ClearProviders(); // 🔥 disable noisy logs
 
 builder.Services.AddCors(options =>
 {
@@ -36,7 +35,8 @@ using (var scope = app.Services.CreateScope())
 
     db.Database.EnsureCreated();
 
-    if (!db.Profiles.AsNoTracking().Any())
+    // ✅ ONLY SEED ONCE
+    if (!db.Profiles.Any())
     {
         await Seeder.SeedProfiles(db);
     }
