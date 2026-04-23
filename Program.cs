@@ -29,6 +29,12 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await Seeder.SeedProfiles(db);
+}
+
 app.UseSwagger();
 app.UseSwaggerUI();
 

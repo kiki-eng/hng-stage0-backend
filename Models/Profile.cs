@@ -12,12 +12,12 @@ public class Profile
 
     public string Gender { get; set; } = default!;
     public double GenderProbability { get; set; }
-    public int SampleSize { get; set; }
 
     public int Age { get; set; }
     public string AgeGroup { get; set; } = default!;
 
     public string CountryId { get; set; } = default!;
+    public string CountryName { get; set; } = default!;
     public double CountryProbability { get; set; }
 
     public DateTime CreatedAt { get; set; }
