@@ -11,6 +11,11 @@ public static class Seeder
             return; // prevents duplicates
 
        var path = Path.Combine(Directory.GetCurrentDirectory(), "Data", "seed_profiles.json");
+       if (!File.Exists(path))
+{
+    Console.WriteLine($"Seed file not found at: {path}");
+    return;
+}
 
       var json = await File.ReadAllTextAsync(path);
 
