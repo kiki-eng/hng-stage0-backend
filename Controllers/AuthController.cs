@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using HngStageZeroClean.Data;
 using HngStageZeroClean.Helpers;
 using HngStageZeroClean.Models;
@@ -53,6 +54,17 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(code))
             return BadRequest(new { status = "error", message = "Missing authorization code" });
 
+        var stateParts = state?.Split('|') ?? [];
+        var redirectUri = stateParts.Length > 1 ? stateParts[1] : null;
+        var isWebSource = state?.Contains("source=web") ?? false;
+        var isCliSource = state?.Contains("source=cli") ?? false;
+
+        if (isCliSource && !string.IsNullOrEmpty(redirectUri))
+        {
+            var sep = redirectUri.Contains('?') ? '&' : '?';
+            return Redirect($"{redirectUri}{sep}code={code}&state={stateParts[0]}");
+        }
+
         var callbackBase = _config["App:BackendUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var callbackUri = $"{callbackBase}/auth/github/callback";
 
@@ -99,10 +111,6 @@ public class AuthController : ControllerBase
 
         var accessToken = _tokens.GenerateAccessToken(user);
         var refreshToken = await _tokens.GenerateRefreshToken(user);
-
-        var stateParts = state?.Split('|') ?? [];
-        var redirectUri = stateParts.Length > 1 ? stateParts[1] : null;
-        var isWebSource = state?.Contains("source=web") ?? false;
 
         if (isWebSource && !string.IsNullOrEmpty(redirectUri))
         {
@@ -329,13 +337,19 @@ public class AuthController : ControllerBase
 
 public class TokenExchangeRequest
 {
+    [JsonPropertyName("code")]
     public string Code { get; set; } = "";
+
+    [JsonPropertyName("code_verifier")]
     public string? CodeVerifier { get; set; }
+
+    [JsonPropertyName("redirect_uri")]
     public string? RedirectUri { get; set; }
 }
 
 public class RefreshRequest
 {
+    [JsonPropertyName("refreshToken")]
     public string? RefreshToken { get; set; }
 }
 
