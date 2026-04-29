@@ -49,15 +49,18 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("github/callback")]
-    public async Task<IActionResult> GitHubCallback([FromQuery] string code, [FromQuery] string state)
+    public async Task<IActionResult> GitHubCallback([FromQuery] string? code, [FromQuery] string? state)
     {
         if (string.IsNullOrEmpty(code))
             return BadRequest(new { status = "error", message = "Missing authorization code" });
 
-        var stateParts = state?.Split('|') ?? [];
+        if (string.IsNullOrEmpty(state))
+            return BadRequest(new { status = "error", message = "Missing state parameter" });
+
+        var stateParts = state.Split('|');
         var redirectUri = stateParts.Length > 1 ? stateParts[1] : null;
-        var isWebSource = state?.Contains("source=web") ?? false;
-        var isCliSource = state?.Contains("source=cli") ?? false;
+        var isWebSource = state.Contains("source=web");
+        var isCliSource = state.Contains("source=cli");
 
         if (isCliSource && !string.IsNullOrEmpty(redirectUri))
         {
@@ -78,35 +81,8 @@ public class AuthController : ControllerBase
 
         var email = ghUser.Email ?? await _github.GetUserEmail(ghToken);
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubId == ghUser.Id.ToString());
-
+        var user = await FindOrCreateUser(ghUser, email);
         if (user == null)
-        {
-            user = new User
-            {
-                Id = UuidV7Generator.Create().ToString(),
-                GitHubId = ghUser.Id.ToString(),
-                Username = ghUser.Login,
-                Email = email,
-                AvatarUrl = ghUser.AvatarUrl,
-                Role = "analyst",
-                IsActive = true,
-                LastLoginAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            };
-            _db.Users.Add(user);
-        }
-        else
-        {
-            user.Username = ghUser.Login;
-            user.Email = email ?? user.Email;
-            user.AvatarUrl = ghUser.AvatarUrl ?? user.AvatarUrl;
-            user.LastLoginAt = DateTime.UtcNow;
-        }
-
-        await _db.SaveChangesAsync();
-
-        if (!user.IsActive)
             return StatusCode(403, new { status = "error", message = "Account is deactivated" });
 
         var accessToken = _tokens.GenerateAccessToken(user);
@@ -159,35 +135,8 @@ public class AuthController : ControllerBase
 
         var email = ghUser.Email ?? await _github.GetUserEmail(ghToken);
 
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubId == ghUser.Id.ToString());
-
+        var user = await FindOrCreateUser(ghUser, email);
         if (user == null)
-        {
-            user = new User
-            {
-                Id = UuidV7Generator.Create().ToString(),
-                GitHubId = ghUser.Id.ToString(),
-                Username = ghUser.Login,
-                Email = email,
-                AvatarUrl = ghUser.AvatarUrl,
-                Role = "analyst",
-                IsActive = true,
-                LastLoginAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            };
-            _db.Users.Add(user);
-        }
-        else
-        {
-            user.Username = ghUser.Login;
-            user.Email = email ?? user.Email;
-            user.AvatarUrl = ghUser.AvatarUrl ?? user.AvatarUrl;
-            user.LastLoginAt = DateTime.UtcNow;
-        }
-
-        await _db.SaveChangesAsync();
-
-        if (!user.IsActive)
             return StatusCode(403, new { status = "error", message = "Account is deactivated" });
 
         var accessToken = _tokens.GenerateAccessToken(user);
@@ -210,9 +159,9 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequest? request = null)
     {
-        var tokenValue = request.RefreshToken;
+        var tokenValue = request?.RefreshToken;
 
         if (string.IsNullOrEmpty(tokenValue))
         {
@@ -242,19 +191,19 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("logout")]
-    [Authorize]
     public async Task<IActionResult> Logout([FromBody] LogoutRequest? request = null)
     {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (userId == null)
+            return Unauthorized(new { status = "error", message = "Authentication required" });
+
         if (!string.IsNullOrEmpty(request?.RefreshToken))
         {
             await _tokens.RevokeToken(request.RefreshToken);
         }
 
-        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userId != null)
-        {
-            await _tokens.RevokeAllUserTokens(userId);
-        }
+        await _tokens.RevokeAllUserTokens(userId);
 
         Response.Cookies.Delete("access_token");
         Response.Cookies.Delete("refresh_token");
@@ -295,16 +244,46 @@ public class AuthController : ControllerBase
         });
     }
 
+    private async Task<User?> FindOrCreateUser(GitHubUser ghUser, string? email)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.GitHubId == ghUser.Id.ToString());
+
+        if (user == null)
+        {
+            var anyUsersExist = await _db.Users.AnyAsync();
+
+            user = new User
+            {
+                Id = UuidV7Generator.Create().ToString(),
+                GitHubId = ghUser.Id.ToString(),
+                Username = ghUser.Login,
+                Email = email,
+                AvatarUrl = ghUser.AvatarUrl,
+                Role = anyUsersExist ? "analyst" : "admin",
+                IsActive = true,
+                LastLoginAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.Users.Add(user);
+        }
+        else
+        {
+            user.Username = ghUser.Login;
+            user.Email = email ?? user.Email;
+            user.AvatarUrl = ghUser.AvatarUrl ?? user.AvatarUrl;
+            user.LastLoginAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+
+        if (!user.IsActive)
+            return null;
+
+        return user;
+    }
+
     private void SetAuthCookies(string accessToken, string refreshToken)
     {
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Lax,
-            Path = "/"
-        };
-
         Response.Cookies.Append("access_token", accessToken, new CookieOptions
         {
             HttpOnly = true,
@@ -349,11 +328,12 @@ public class TokenExchangeRequest
 
 public class RefreshRequest
 {
-    [JsonPropertyName("refreshToken")]
+    [JsonPropertyName("refresh_token")]
     public string? RefreshToken { get; set; }
 }
 
 public class LogoutRequest
 {
+    [JsonPropertyName("refresh_token")]
     public string? RefreshToken { get; set; }
 }

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using HngStageZeroClean.Data;
 using HngStageZeroClean.Middleware;
@@ -49,6 +50,21 @@ builder.Services.AddAuthentication(options =>
                 context.Token = cookieToken;
             }
             return Task.CompletedTask;
+        },
+        OnChallenge = context =>
+        {
+            context.HandleResponse();
+            context.Response.StatusCode = 401;
+            context.Response.ContentType = "application/json";
+            var body = JsonSerializer.Serialize(new { status = "error", message = "Authentication required" });
+            return context.Response.WriteAsync(body);
+        },
+        OnForbidden = context =>
+        {
+            context.Response.StatusCode = 403;
+            context.Response.ContentType = "application/json";
+            var body = JsonSerializer.Serialize(new { status = "error", message = "Forbidden" });
+            return context.Response.WriteAsync(body);
         }
     };
 });
@@ -58,29 +74,30 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<GitHubService>();
 
-var webPortalUrl = builder.Configuration["App:WebPortalUrl"] ?? "http://localhost:3000";
-
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithOrigins("*")
+        policy.AllowAnyOrigin()
               .AllowAnyHeader()
               .AllowAnyMethod();
-    });
-
-    options.AddPolicy("AllowWeb", policy =>
-    {
-        policy.WithOrigins(webPortalUrl, "http://localhost:3000", "http://localhost:3001")
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
     });
 });
 
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = 429;
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = 429;
+        context.HttpContext.Response.ContentType = "application/json";
+        var retryAfter = "60";
+        context.HttpContext.Response.Headers["Retry-After"] = retryAfter;
+        await context.HttpContext.Response.WriteAsync(
+            JsonSerializer.Serialize(new { status = "error", message = "Rate limit exceeded. Try again later." }),
+            cancellationToken);
+    };
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
