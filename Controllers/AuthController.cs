@@ -106,8 +106,8 @@ public class AuthController : ControllerBase
 
         if (isWebSource && !string.IsNullOrEmpty(redirectUri))
         {
-            SetAuthCookies(accessToken, refreshToken.Token);
-            return Redirect(redirectUri);
+            var sep = redirectUri.Contains('?') ? '&' : '?';
+            return Redirect($"{redirectUri}{sep}access_token={accessToken}&refresh_token={refreshToken.Token}&username={user.Username}");
         }
 
         if (!string.IsNullOrEmpty(redirectUri) && !redirectUri.StartsWith("source="))
