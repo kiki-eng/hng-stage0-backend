@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 using HngStageZeroClean.Data;
 using HngStageZeroClean.Helpers;
@@ -14,6 +17,8 @@ namespace HngStageZeroClean.Controllers;
 [Route("auth")]
 public class AuthController : ControllerBase
 {
+    private static readonly ConcurrentDictionary<string, PkceEntry> _pkceStore = new();
+
     private readonly GitHubService _github;
     private readonly TokenService _tokens;
     private readonly AppDbContext _db;
@@ -34,7 +39,9 @@ public class AuthController : ControllerBase
         [FromQuery] string? code_challenge,
         [FromQuery] string? source)
     {
-        var callbackBase = _config["App:BackendUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        var callbackBase = _config["App:BackendUrl"];
+        if (string.IsNullOrEmpty(callbackBase))
+            callbackBase = $"{Request.Scheme}://{Request.Host}";
         var callbackUri = $"{callbackBase}/auth/github/callback";
 
         var oauthState = state ?? Guid.NewGuid().ToString("N");
@@ -44,18 +51,43 @@ public class AuthController : ControllerBase
         if (!string.IsNullOrEmpty(source))
             oauthState += $"|source={source}";
 
+        if (!string.IsNullOrEmpty(code_challenge))
+        {
+            CleanExpiredPkce();
+            _pkceStore[oauthState] = new PkceEntry
+            {
+                CodeChallenge = code_challenge,
+                CreatedAt = DateTime.UtcNow
+            };
+        }
+
         var url = _github.GetAuthorizationUrl(oauthState, callbackUri, code_challenge);
         return Redirect(url);
     }
 
     [HttpGet("github/callback")]
-    public async Task<IActionResult> GitHubCallback([FromQuery] string? code, [FromQuery] string? state)
+    public async Task<IActionResult> GitHubCallback(
+        [FromQuery] string? code,
+        [FromQuery] string? state,
+        [FromQuery] string? code_verifier)
     {
         if (string.IsNullOrEmpty(code))
             return BadRequest(new { status = "error", message = "Missing authorization code" });
 
         if (string.IsNullOrEmpty(state))
             return BadRequest(new { status = "error", message = "Missing state parameter" });
+
+        if (_pkceStore.TryGetValue(state, out var pkce))
+        {
+            if (string.IsNullOrEmpty(code_verifier))
+                return BadRequest(new { status = "error", message = "Missing code_verifier for PKCE flow" });
+
+            var expectedChallenge = Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(code_verifier)));
+            if (expectedChallenge != pkce.CodeChallenge)
+                return BadRequest(new { status = "error", message = "Invalid code_verifier: PKCE validation failed" });
+
+            _pkceStore.TryRemove(state, out _);
+        }
 
         var stateParts = state.Split('|');
         var redirectUri = stateParts.Length > 1 ? stateParts[1] : null;
@@ -68,12 +100,14 @@ public class AuthController : ControllerBase
             return Redirect($"{redirectUri}{sep}code={code}&state={stateParts[0]}");
         }
 
-        var callbackBase = _config["App:BackendUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        var callbackBase = _config["App:BackendUrl"];
+        if (string.IsNullOrEmpty(callbackBase))
+            callbackBase = $"{Request.Scheme}://{Request.Host}";
         var callbackUri = $"{callbackBase}/auth/github/callback";
 
         var ghToken = await _github.ExchangeCodeForToken(code, callbackUri);
         if (ghToken == null)
-            return StatusCode(502, new { status = "error", message = "Failed to exchange code with GitHub" });
+            return BadRequest(new { status = "error", message = "Invalid authorization code or code has expired" });
 
         var ghUser = await _github.GetUserInfo(ghToken);
         if (ghUser == null)
@@ -122,12 +156,14 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(request.Code))
             return BadRequest(new { status = "error", message = "Missing authorization code" });
 
-        var callbackBase = _config["App:BackendUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        var callbackBase = _config["App:BackendUrl"];
+        if (string.IsNullOrEmpty(callbackBase))
+            callbackBase = $"{Request.Scheme}://{Request.Host}";
         var callbackUri = $"{callbackBase}/auth/github/callback";
 
         var ghToken = await _github.ExchangeCodeForToken(request.Code, request.RedirectUri ?? callbackUri, request.CodeVerifier);
         if (ghToken == null)
-            return StatusCode(502, new { status = "error", message = "Failed to exchange code with GitHub" });
+            return BadRequest(new { status = "error", message = "Invalid authorization code or code has expired" });
 
         var ghUser = await _github.GetUserInfo(ghToken);
         if (ghUser == null)
@@ -164,9 +200,7 @@ public class AuthController : ControllerBase
         var tokenValue = request?.RefreshToken;
 
         if (string.IsNullOrEmpty(tokenValue))
-        {
             tokenValue = Request.Cookies["refresh_token"];
-        }
 
         if (string.IsNullOrEmpty(tokenValue))
             return BadRequest(new { status = "error", message = "Missing refresh token" });
@@ -178,9 +212,7 @@ public class AuthController : ControllerBase
         var (accessToken, refreshToken) = result.Value;
 
         if (Request.Cookies.ContainsKey("access_token"))
-        {
             SetAuthCookies(accessToken, refreshToken.Token);
-        }
 
         return Ok(new
         {
@@ -199,9 +231,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new { status = "error", message = "Authentication required" });
 
         if (!string.IsNullOrEmpty(request?.RefreshToken))
-        {
             await _tokens.RevokeToken(request.RefreshToken);
-        }
 
         await _tokens.RevokeAllUserTokens(userId);
 
@@ -275,11 +305,7 @@ public class AuthController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
-
-        if (!user.IsActive)
-            return null;
-
-        return user;
+        return user.IsActive ? user : null;
     }
 
     private void SetAuthCookies(string accessToken, string refreshToken)
@@ -302,8 +328,7 @@ public class AuthController : ControllerBase
             MaxAge = TimeSpan.FromMinutes(5)
         });
 
-        var csrfToken = Guid.NewGuid().ToString("N");
-        Response.Cookies.Append("csrf_token", csrfToken, new CookieOptions
+        Response.Cookies.Append("csrf_token", Guid.NewGuid().ToString("N"), new CookieOptions
         {
             HttpOnly = false,
             Secure = true,
@@ -312,6 +337,30 @@ public class AuthController : ControllerBase
             MaxAge = TimeSpan.FromMinutes(5)
         });
     }
+
+    private static string Base64UrlEncode(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private static void CleanExpiredPkce()
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-10);
+        foreach (var key in _pkceStore.Keys)
+        {
+            if (_pkceStore.TryGetValue(key, out var entry) && entry.CreatedAt < cutoff)
+                _pkceStore.TryRemove(key, out _);
+        }
+    }
+}
+
+public class PkceEntry
+{
+    public string CodeChallenge { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
 }
 
 public class TokenExchangeRequest

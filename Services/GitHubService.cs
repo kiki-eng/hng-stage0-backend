@@ -47,10 +47,15 @@ public class GitHubService
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         var response = await client.SendAsync(request);
+        var json = await response.Content.ReadAsStringAsync();
+
         if (!response.IsSuccessStatusCode) return null;
 
-        var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<GitHubTokenResponse>(json);
+
+        if (!string.IsNullOrEmpty(result?.Error))
+            return null;
+
         return result?.AccessToken;
     }
 
@@ -92,6 +97,12 @@ public class GitHubTokenResponse
 
     [JsonPropertyName("scope")]
     public string? Scope { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    [JsonPropertyName("error_description")]
+    public string? ErrorDescription { get; set; }
 }
 
 public class GitHubUser

@@ -5,6 +5,7 @@ using HngStageZeroClean.Data;
 using HngStageZeroClean.Middleware;
 using HngStageZeroClean.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -74,6 +75,13 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<GitHubService>();
 
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -92,8 +100,7 @@ builder.Services.AddRateLimiter(options =>
     {
         context.HttpContext.Response.StatusCode = 429;
         context.HttpContext.Response.ContentType = "application/json";
-        var retryAfter = "60";
-        context.HttpContext.Response.Headers["Retry-After"] = retryAfter;
+        context.HttpContext.Response.Headers["Retry-After"] = "60";
         await context.HttpContext.Response.WriteAsync(
             JsonSerializer.Serialize(new { status = "error", message = "Rate limit exceeded. Try again later." }),
             cancellationToken);
@@ -102,7 +109,9 @@ builder.Services.AddRateLimiter(options =>
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
         var path = context.Request.Path.ToString();
-        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var ip = context.Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0]?.Trim()
+                 ?? context.Connection.RemoteIpAddress?.ToString()
+                 ?? "unknown";
 
         if (path.StartsWith("/auth"))
         {
@@ -150,6 +159,8 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine("SEED ERROR: " + ex.ToString());
     }
 }
+
+app.UseForwardedHeaders();
 
 app.Use(async (context, next) =>
 {
