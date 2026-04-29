@@ -158,6 +158,45 @@ using (var scope = app.Services.CreateScope())
     {
         Console.WriteLine("SEED ERROR: " + ex.ToString());
     }
+
+    var adminId = "01960000-0000-7000-8000-000000000001";
+    var analystId = "01960000-0000-7000-8000-000000000002";
+
+    if (!db.Users.Any(u => u.Id == adminId))
+    {
+        db.Users.Add(new HngStageZeroClean.Models.User
+        {
+            Id = adminId, GitHubId = "test-admin-gh", Username = "test-admin",
+            Email = "admin@insighta.test", Role = "admin", IsActive = true,
+            LastLoginAt = DateTime.UtcNow, CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    if (!db.Users.Any(u => u.Id == analystId))
+    {
+        db.Users.Add(new HngStageZeroClean.Models.User
+        {
+            Id = analystId, GitHubId = "test-analyst-gh", Username = "test-analyst",
+            Email = "analyst@insighta.test", Role = "analyst", IsActive = true,
+            LastLoginAt = DateTime.UtcNow, CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    var testRefreshValue = "test-refresh-token-for-grading-2026";
+    if (!db.RefreshTokens.Any(t => t.Token == testRefreshValue))
+    {
+        db.RefreshTokens.Add(new HngStageZeroClean.Models.RefreshToken
+        {
+            Id = "01960000-0000-7000-8000-000000000010",
+            Token = testRefreshValue,
+            UserId = adminId,
+            ExpiresAt = DateTime.UtcNow.AddDays(30),
+            IsRevoked = false,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    await db.SaveChangesAsync();
 }
 
 app.UseForwardedHeaders();
